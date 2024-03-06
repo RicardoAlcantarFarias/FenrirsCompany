@@ -1,51 +1,43 @@
-import scapy.all as scapy
+from scapy.all import sniff, IP, TCP
 import threading
 
-def analizar_paquete(paquete, cancel_signal):
-    if cancel_signal.is_set():
-        return
+# Variable global para controlar si se debe cancelar el análisis
+cancel_analysis = False
 
-    if paquete.haslayer(scapy.IP):
-        ip_origen = paquete[scapy.IP].src
-        ip_destino = paquete[scapy.IP].dst
-        print(f"IP Origen: {ip_origen}, IP Destino: {ip_destino}")
+def analyze_packet(packet):
+    if IP in packet and TCP in packet:
+        src_ip = packet[IP].src
+        dst_ip = packet[IP].dst
+        src_port = packet[TCP].sport
+        dst_port = packet[TCP].dport
+        
+        # Detectar actividad sospechosa
+        if packet[TCP].flags == 0x12:  # SYN-ACK
+            print(f"Posible escaneo de puertos desde {src_ip}:{src_port} hacia {dst_ip}:{dst_port}")
+        elif packet[TCP].flags == 0x02:  # SYN
+            print(f"Posible intento de conexión desde {src_ip}:{src_port} hacia {dst_ip}:{dst_port}")
+        elif packet[TCP].flags == 0x05:  # RST-ACK
+            print(f"Posible escaneo de puertos cerrados desde {src_ip}:{src_port} hacia {dst_ip}:{dst_port}")
 
-    if paquete.haslayer(scapy.TCP):
-        puerto_origen = paquete[scapy.TCP].sport
-        puerto_destino = paquete[scapy.TCP].dport
-        print(f"Puerto TCP Origen: {puerto_origen}, Puerto TCP Destino: {puerto_destino}")
-
-    if paquete.haslayer(scapy.UDP):
-        puerto_origen = paquete[scapy.UDP].sport
-        puerto_destino = paquete[scapy.UDP].dport
-        print(f"Puerto UDP Origen: {puerto_origen}, Puerto UDP Destino: {puerto_destino}")
-
-def sniff_paquetes(cancel_signal):
-    # Sniffing de paquetes en la interfaz de red
-    scapy.sniff(store=False, prn=lambda x: analizar_paquete(x, cancel_signal))
+def start_analysis():
+    global cancel_analysis
+    # Configurar el filtro para capturar solo paquetes TCP
+    sniff(filter="tcp", prn=analyze_packet, store=0, stop_filter=lambda x: cancel_analysis, timeout=1)
 
 def main():
-    print('¡Bienvenido al analizador de paquetes con Scapy!')
-    print('Presiona Enter para cancelar el análisis.')
+    global cancel_analysis
+    try:
+        # Crear un hilo de subproceso para el análisis
+        analysis_thread = threading.Thread(target=start_analysis)
+        analysis_thread.start()
 
-    # Crear una señal de cancelación
-    cancel_signal = threading.Event()
+        # Esperar hasta que el usuario cancele el análisis
+        input("Presione Enter para cancelar el análisis...")
+        cancel_analysis = True
+        analysis_thread.join()
+    except KeyboardInterrupt:
+        cancel_analysis = True
+        print("\nAnálisis cancelado por el usuario.")
 
-    # Crear y comenzar el hilo de sniffing
-    sniff_thread = threading.Thread(target=sniff_paquetes, args=(cancel_signal,))
-    sniff_thread.start()
-
-    # Esperar a que el usuario presione Enter para cancelar
-    input()
-
-    # Establecer la señal de cancelación
-    cancel_signal.set()
-
-    # Esperar a que el hilo de sniffing termine
-    sniff_thread.join()
-
-    print('Análisis de paquetes cancelado.')
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

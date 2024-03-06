@@ -37,20 +37,22 @@ def verificar_firewall():
         except subprocess.CalledProcessError:
             pass
     return False
+
 def verificar_parches():
-  sistema_operativo = platform.system()
-  if sistema_operativo == "Windows":
-    try:
-      salida = subprocess.check_output("wmic qfe list brief")
-      return True
-    except subprocess.CalledProcessError:
-      return False 
-  elif sistema_operativo == "Linux":
-    try:
-      salida = subprocess.check_output("apt list --upgradable") 
-      return True
-    except subprocess.CalledProcessError:   
-      return False
+    sistema_operativo = platform.system()
+    if sistema_operativo == "Windows":
+        try:
+            salida = subprocess.check_output("wmic qfe list brief")
+            return True
+        except subprocess.CalledProcessError:
+            return False
+    elif sistema_operativo == "Linux":
+        try:
+            salida = subprocess.check_output("apt list --upgradable") 
+            return True
+        except subprocess.CalledProcessError:   
+            return False
+    return False  # Devuelve False si no se puede verificar
 
 def main():
     print("Herramienta de Auto-Diagnóstico de Ciberseguridad")

@@ -15,6 +15,8 @@ import re
 from urllib.parse import urlparse
 import hashlib
 import datetime
+from scapy.all import sniff, IP, TCP
+import threading  # Importa la biblioteca threading
 
 os.system('cls')
 
@@ -22,7 +24,7 @@ os.system('cls')
 def menu():
     print("\nBienvenido a la Herramienta de Seguridad Fenrir's \n")
     print("Selecciona una opción:")
-    print("1.- Analisos de Trafico de red.")
+    print("1.- Analisis deteccion de Intrusos")
     print("2.- Escaneo de Puertos IP.")
     print("3.- Herramienta de autodiagnostico")
     print("4.- Escaneo de vulnerabilidades de paginas")
@@ -32,52 +34,51 @@ def menu():
     if user_input == "1":
         print("Comenzando Analisis de Trafico de red")
         # Replace this comment with your desired functionality for Option 1.
-        def analizar_paquete(paquete, cancel_signal):
-            if cancel_signal.is_set():
+        # Variable global para controlar si se debe cancelar el análisis
+        cancel_analysis = False
+
+        def analyze_packet(packet):
+            nonlocal cancel_analysis
+            if cancel_analysis:
                 return
 
-            if paquete.haslayer(scapy.IP):
-                ip_origen = paquete[scapy.IP].src
-                ip_destino = paquete[scapy.IP].dst
-                print(f"IP Origen: {ip_origen}, IP Destino: {ip_destino}")
+            if IP in packet and TCP in packet:
+                src_ip = packet[IP].src
+                dst_ip = packet[IP].dst
+                src_port = packet[TCP].sport
+                dst_port = packet[TCP].dport
+                
+                # Detectar actividad sospechosa
+                if packet[TCP].flags == 0x12:  # SYN-ACK
+                    print(f"Posible escaneo de puertos desde {src_ip}:{src_port} hacia {dst_ip}:{dst_port}")
+                elif packet[TCP].flags == 0x02:  # SYN
+                    print(f"Posible intento de conexión desde {src_ip}:{src_port} hacia {dst_ip}:{dst_port}")
+                elif packet[TCP].flags == 0x05:  # RST-ACK
+                    print(f"Posible escaneo de puertos cerrados desde {src_ip}:{src_port} hacia {dst_ip}:{dst_port}")
 
-            if paquete.haslayer(scapy.TCP):
-                puerto_origen = paquete[scapy.TCP].sport
-                puerto_destino = paquete[scapy.TCP].dport
-                print(f"Puerto TCP Origen: {puerto_origen}, Puerto TCP Destino: {puerto_destino}")
-
-            if paquete.haslayer(scapy.UDP):
-                puerto_origen = paquete[scapy.UDP].sport
-                puerto_destino = paquete[scapy.UDP].dport
-                print(f"Puerto UDP Origen: {puerto_origen}, Puerto UDP Destino: {puerto_destino}")
-
-        def sniff_paquetes(cancel_signal):
-        # Sniffing de paquetes en la interfaz de red
-            scapy.sniff(store=False, prn=lambda x: analizar_paquete(x, cancel_signal))
+        def start_analysis():
+            # Configurar el filtro para capturar solo paquetes TCP
+            sniff(iface=None, filter="tcp", prn=analyze_packet, store=0, timeout=1)
 
         def main():
-            print('¡Bienvenido al analizador de paquetes con Scapy!')
-            print('Presiona Enter para cancelar el análisis.')
+            nonlocal cancel_analysis
+            cancel_analysis = False  # Restablecer la variable cancel_analysis
+            try:
+                # Iniciar el análisis en un hilo de subproceso
+                start_analysis_thread = threading.Thread(target=start_analysis)
+                start_analysis_thread.start()
 
-            # Crear una señal de cancelación
-            cancel_signal = threading.Event()
+                # Esperar hasta que el usuario cancele el análisis
+                input("Presione Enter para cancelar el análisis...\n")
+                cancel_analysis = True
+                start_analysis_thread.join()
+            except KeyboardInterrupt:
+                cancel_analysis = True
+                print("\nAnálisis cancelado por el usuario.")
 
-            # Crear y comenzar el hilo de sniffing
-            sniff_thread = threading.Thread(target=sniff_paquetes, args=(cancel_signal,))
-            sniff_thread.start()
-
-            # Esperar a que el usuario presione Enter para cancelar
-            input()
-
-            # Establecer la señal de cancelación
-            cancel_signal.set()
-
-            # Esperar a que el hilo de sniffing termine
-            sniff_thread.join()
-
-            print('Análisis de paquetes cancelado.')
-        if __name__ == '__main__':
+        if __name__ == "__main__":
             main()
+
     elif user_input == "2":
         print("Comenzando Escaneo de Puerto IP")
         # Replace this comment with your desired functionality for Option 2.
@@ -180,7 +181,7 @@ def menu():
                 except subprocess.CalledProcessError:
                     pass
             return False
-        
+
         def verificar_parches():
             sistema_operativo = platform.system()
             if sistema_operativo == "Windows":
@@ -188,13 +189,14 @@ def menu():
                     salida = subprocess.check_output("wmic qfe list brief")
                     return True
                 except subprocess.CalledProcessError:
-                    return False 
+                    return False
             elif sistema_operativo == "Linux":
                 try:
                     salida = subprocess.check_output("apt list --upgradable") 
                     return True
                 except subprocess.CalledProcessError:   
                     return False
+            return False  # Devuelve False si no se puede verificar
 
         def main():
             print("Herramienta de Auto-Diagnóstico de Ciberseguridad")
@@ -221,6 +223,7 @@ def menu():
                 print("    Configuración del firewall: OK")
             else:
                 print("    Configuración del firewall: Fallo")
+                
             print("\n[4] Verificando parches de sistema operativo...")
             if verificar_parches():
                 print(" Parches de sistema operativo: Actualizados") 
@@ -232,124 +235,146 @@ def menu():
             main()
     elif user_input == "4":
         print("Comenzando Escaneo de vunerabilidades de paginas web")
-        target_url = input("Enter target URL: ")
-        def analyze_website(url):
-            is_fraudulent = False
+        def scan_website():
+            url = input("Ingrese la URL del sitio web a escanear: ")
 
-            # Obtener el contenido
             try:
+                # Enviar una solicitud GET a la URL
                 response = requests.get(url)
-                content = response.text
-            except:
-                print("\nNo se pudo acceder al sitio web")
-                return True
-        
-            # Analizar la URL
-            url_parsed = urlparse(url)
-            if not url_parsed.scheme or not url_parsed.netloc:
-                print("\nURL inválida")
-                is_fraudulent = True
+                response.raise_for_status()  # Lanzar una excepción si la solicitud falla
 
-            # Buscar indicadores de fraude
-            suspicious_words = ["lotería", "premio", "regalo", "dinero gratis"]
-            for word in suspicious_words:
-                if word in content:
-                    print("Contenido sospechoso detectado")
-                    is_fraudulent = True
-                    break
-            return is_fraudulent
-        result = analyze_website(target_url)
-        if result:
-            print("\nEl sitio parece FRAUDULENTO")
-        else:
-            print("\nEl sitio parece LEGÍTIMO")
-        def fetch_page(url):
-            response = requests.get(url)
-            return response.text
-        def analyze_page(page_content):
-            vulnerabilities = []
-            # XSS
-            xss_patterns = ["<script>alert(1)</script>", "src=j&Tab;a&Tab;v&Tab;asc&NewLine;ript:alert(&apos;XSS&apos;)"]
-            for pattern in xss_patterns:
-                if re.search(pattern, page_content):
-                    vulnerabilities.append("XSS")
+                # Buscar posibles vulnerabilidades
+                check_xss(response.text)
+                check_sql_injection(url)
+                check_open_redirects(response.text)
+                
+                # Verificar la reputación del sitio
+                if check_site_reputation(url):
+                    print("El sitio parece ser legítimo.")
+                else:
+                    print("El sitio puede ser fraudulento.")
 
-            # Shell injection 
-            shell_pattern = "El fichero o directorio no existe"
-            if shell_pattern in page_content:
-                vulnerabilities.append("Inyección de comandos del sistema operativo")
-            
-            # Directory traversal 
-            traversal_pattern = "root:/bin/bash"
-            if traversal_pattern in page_content:
-                vulnerabilities.append("Recorrido del directorio")
+                print(f"Escaneo completado para {url}")
+            except requests.exceptions.RequestException as e:
+                print(f"Error al escanear {url}: {e}")
 
-            # Cabeceras inseguras
-            headers = requests.get(target_url).headers
-            if "X-XSS-Protection" not in headers:
-                vulnerabilities.append("Encabezados inseguros")
-    
-            return vulnerabilities
-        page_content = fetch_page(target_url)
-        vulnerabilities = analyze_page(page_content) 
-        print(f"\nVulnerabilidades encontradas en {target_url}: {vulnerabilities}")
+        def check_xss(html):
+            # Buscar campos de entrada de formulario
+            input_fields = ['<input', '<textarea']
+            for field in input_fields:
+                if field in html:
+                    print("Se encontró una posible vulnerabilidad XSS en los campos de entrada. Esto significa que un atacante puede intentar inyectar código malicioso, como scripts, en el sitio web, lo que podría comprometer la seguridad del usuario.")
+
+        def check_sql_injection(url):
+            # Enviar una solicitud con una carga útil de inyección SQL
+            payload = "' OR '1'='1"
+            test_url = f"{url}?id={payload}"
+            response = requests.get(test_url)
+
+            # Analizar la respuesta para detectar posibles vulnerabilidades
+            if "error" not in response.text.lower():
+                print("Se encontró una posible vulnerabilidad de inyección SQL. Esto significa que un atacante puede manipular la consulta SQL enviada al servidor, lo que podría permitir el acceso no autorizado a la base de datos y la manipulación de datos sensibles.")
+
+        def check_open_redirects(html):
+            # Buscar redirecciones abiertas
+            redirect_params = ['redirect', 'url=']
+            for param in redirect_params:
+                if param in html:
+                    print("Se encontró una posible redirección abierta. Esto significa que un atacante puede manipular los parámetros de la URL para redirigir al usuario a sitios maliciosos, phishing u otros sitios no deseados sin su conocimiento.")
+                    
+        def check_site_reputation(url):
+            # Verificar la reputación del sitio utilizando Google Safe Browsing API
+            api_key = "TU_API_KEY"  # Reemplaza esto con tu API key de Google Safe Browsing
+            safe_browsing_url = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={api_key}"
+            payload = {
+                "client": {
+                    "clientId": "yourcompany",
+                    "clientVersion": "1.5.2"
+                },
+                "threatInfo": {
+                    "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING"],
+                    "platformTypes": ["ANY_PLATFORM"],
+                    "threatEntryTypes": ["URL"],
+                    "threatEntries": [
+                        {"url": url}
+                    ]
+                }
+            }
+            response = requests.post(safe_browsing_url, json=payload)
+            if response.status_code == 200:
+                data = response.json()
+                if 'matches' in data:
+                    print("Advertencia: Este sitio ha sido identificado como potencialmente peligroso por Google Safe Browsing.")
+                    return False
+            return True
+
+        # Ejemplo de uso
+        scan_website()
     elif user_input == "5":
         print("Comenzando el Analisis Forense")
-        class ForensicTool:
-            def __init__(self):
-                self.case_id = ''
-                self.evidence = []
+        def analyze_file(file_path):
+            if os.path.isfile(file_path):
+                # Leer el contenido del archivo
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
+                    content = file.read()
 
-            def start_case(self):
-                self.case_id = input("Ingrese el ID del caso: ")
-                self.evidence = [] 
-                print(f"Caso inicial con identificación: {self.case_id}") 
+                # Definir patrones sospechosos
+                malicious_patterns = [
+                    r'password\s*=\s*[\'"]?([^\'" ]+)[\'"]?',  # Buscar contraseñas
+                    r'(ssh|ftp|telnet)\s*:\s*[^ ]+@[^ ]+',     # Buscar credenciales de acceso remoto
+                    r'(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b)',  # Buscar direcciones IP
+                    r'(https?|ftp)\s*:\s*[^ ]+',              # Buscar URLs
+                    r'exec\s*\([^)]*sh\s+[-|<]',               # Buscar ejecución de shell
+                    # Agregar más patrones según sea necesario
+                ]
 
-            def add_evidence(self, evidence_path):
-                if not os.path.exists(evidence_path):
-                    print(f"evidencia en {evidence_path} no existe")
-                    return
-            
-                self.evidence.append(evidence_path)
-                print(f"Se agregó evidencia en {evidence_path}")
+                # Buscar coincidencias con patrones sospechosos
+                suspicious_activities = []
+                for pattern in malicious_patterns:
+                    matches = re.findall(pattern, content)
+                    if matches:
+                        suspicious_activities.extend(matches)
 
-            def analyze_files(self):
-                print("Analizando archivos...")
-                suspicious_files = []
+                return suspicious_activities
+            else:
+                print(f"No se pudo abrir el archivo: {file_path}")
+                return None
 
-                for filepath in self.evidence:
-                    filename = os.path.basename(filepath)
+        def analyze_directory(directory):
+            suspicious_activities = {}
+            for root, _, files in os.walk(directory):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    suspicious_activities[file_path] = analyze_file(file_path)
+            return suspicious_activities
 
-                    # Check hash against database of known malicious files
-                    file_hash = self.generate_hash(filepath)
-                    if self.check_malicious(file_hash):
-                        print(f"{filename} Identificado como malicioso")
-                        suspicious_files.append(filepath)
-                     # Check timestamps  
-                    t = os.path.getmtime(filepath)
-                    filetime = datetime.datetime.fromtimestamp(t)  
-                    if self.check_suspicious_time(filetime):
-                        print(f"Marca de tiempo sospechosa en {filename}")
-                        suspicious_files.append(filepath)
-                return suspicious_files    
-            def generate_hash(self, filepath):
-                hash_md5 = hashlib.md5()
-                with open(filepath, "rb") as f:
-                    for chunk in iter(lambda: f.read(4096), b""):
-                        hash_md5.update(chunk)
-                return hash_md5.hexdigest()
-            def check_malicious(self, file_hash): 
-            # Logic to check hash against database
-                return False 
-            def check_suspicious_time(self, filetime):
-            # Logic to check if timestamp is suspicious
-                return False
+        def main():
+            path = input("Ingrese la ruta del archivo o directorio para analizar: ")
+            if os.path.isfile(path):
+                suspicious_activities = analyze_file(path)
+                if suspicious_activities:
+                    print("Se encontraron actividades sospechosas:")
+                    for activity in suspicious_activities:
+                        print(activity)
+                else:
+                    print("No se encontraron actividades sospechosas en el archivo.")
+            elif os.path.isdir(path):
+                suspicious_activities = analyze_directory(path)
+                if suspicious_activities:
+                    print("Se encontraron actividades sospechosas en los siguientes archivos:")
+                    for file_path, activities in suspicious_activities.items():
+                        if activities:
+                            print(f"Archivo: {file_path}")
+                            for activity in activities:
+                                print(activity)
+                else:
+                    print("No se encontraron actividades sospechosas en el directorio.")
+            else:
+                print("La ruta especificada no es válida.")
+
         if __name__ == "__main__":
-            tool = ForensicTool()
-            tool.start_case()
-            tool.add_evidence('file1.txt')
-            tool.add_evidence('malware.exe')
-            tool.analyze_files()
+            main()
+
 
 def main():
     while True:
