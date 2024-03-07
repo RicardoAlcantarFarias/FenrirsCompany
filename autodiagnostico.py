@@ -15,8 +15,7 @@ import re
 from urllib.parse import urlparse
 import hashlib
 import datetime
-from scapy.all import sniff, IP, TCP
-import threading  # Importa la biblioteca threading
+import requests
 
 os.system('cls')
 
@@ -33,51 +32,61 @@ def menu():
 
     if user_input == "1":
         print("Comenzando Analisis de Trafico de red")
-        # Replace this comment with your desired functionality for Option 1.
-        # Variable global para controlar si se debe cancelar el análisis
-        cancel_analysis = False
+        def get_info(resource, api_key):
+            url = 'https://www.virustotal.com/vtapi/v2/url/report'
+            params = {'apikey': api_key, 'resource': resource}
+            
+            if '.' in resource:  # Suponemos que es una URL o un dominio
+                url = 'https://www.virustotal.com/vtapi/v2/url/report'
+            elif ':' in resource:  # Suponemos que es una dirección IP
+                url = 'https://www.virustotal.com/vtapi/v2/ip-address/report'
+            else:  # Suponemos que es un hash de archivo
+                url = 'https://www.virustotal.com/vtapi/v2/file/report'
 
-        def analyze_packet(packet):
-            nonlocal cancel_analysis
-            if cancel_analysis:
-                return
-
-            if IP in packet and TCP in packet:
-                src_ip = packet[IP].src
-                dst_ip = packet[IP].dst
-                src_port = packet[TCP].sport
-                dst_port = packet[TCP].dport
-                
-                # Detectar actividad sospechosa
-                if packet[TCP].flags == 0x12:  # SYN-ACK
-                    print(f"Posible escaneo de puertos desde {src_ip}:{src_port} hacia {dst_ip}:{dst_port}")
-                elif packet[TCP].flags == 0x02:  # SYN
-                    print(f"Posible intento de conexión desde {src_ip}:{src_port} hacia {dst_ip}:{dst_port}")
-                elif packet[TCP].flags == 0x05:  # RST-ACK
-                    print(f"Posible escaneo de puertos cerrados desde {src_ip}:{src_port} hacia {dst_ip}:{dst_port}")
-
-        def start_analysis():
-            # Configurar el filtro para capturar solo paquetes TCP
-            sniff(iface=None, filter="tcp", prn=analyze_packet, store=0, timeout=1)
+            response = requests.get(url, params=params)
+            
+            # Verificar si la respuesta es vacía
+            if response.text:
+                try:
+                    data = response.json()
+                    return data
+                except ValueError as e:
+                    print(f"Error al decodificar la respuesta JSON: {e}")
+                    return None
+            else:
+                print("La respuesta recibida está vacía.")
+                return None
 
         def main():
-            nonlocal cancel_analysis
-            cancel_analysis = False  # Restablecer la variable cancel_analysis
-            try:
-                # Iniciar el análisis en un hilo de subproceso
-                start_analysis_thread = threading.Thread(target=start_analysis)
-                start_analysis_thread.start()
-
-                # Esperar hasta que el usuario cancele el análisis
-                input("Presione Enter para cancelar el análisis...\n")
-                cancel_analysis = True
-                start_analysis_thread.join()
-            except KeyboardInterrupt:
-                cancel_analysis = True
-                print("\nAnálisis cancelado por el usuario.")
+            api_key = '85418d0763f67104dda7e4b484a932109ffcb4780fce4eeca9ab09d30927499b'  # Reemplaza 'TU_API_KEY' con tu clave API de VirusTotal
+            resource = input("Introduce la URL, dirección IP, dominio o hash de archivo a analizar: ")
+            info = get_info(resource, api_key)
+            
+            if info:
+                if 'response_code' in info:
+                    if info['response_code'] == 1:
+                        print("Información:")
+                        if 'url' in info:
+                            print(f"Recurso: {info['url']}")
+                        elif 'ip_address' in info:
+                            print(f"Dirección IP: {info['ip_address']}")
+                        elif 'md5' in info:
+                            print(f"Hash MD5: {info['md5']}")
+                        print(f"Positivos totales: {info['positives']}")
+                        print(f"Motor de detección: {info['scan_date']}")
+                        print("Resultados:")
+                        for engine, result in info['scans'].items():
+                            print(f"{engine}: {result['result']}")
+                    else:
+                        print("El recurso no fue encontrado en la base de datos de VirusTotal.")
+                else:
+                    print("Error al obtener información.")
+            else:
+                print("No se pudo obtener información para el recurso especificado.")
 
         if __name__ == "__main__":
             main()
+
 
     elif user_input == "2":
         print("Comenzando Escaneo de Puerto IP")
@@ -106,7 +115,7 @@ def menu():
                 port_scan(ip, port, cancel_signal)
 
         def main():
-            os.system('clear')
+            os.system('cls')
             print('¡Bienvenido al escáner de puertos!')
             time.sleep(2)
 
@@ -320,11 +329,11 @@ def menu():
 
                 # Definir patrones sospechosos
                 malicious_patterns = [
-                    r'password\s*=\s*[\'"]?([^\'" ]+)[\'"]?',  # Buscar contraseñas
-                    r'(ssh|ftp|telnet)\s*:\s*[^ ]+@[^ ]+',     # Buscar credenciales de acceso remoto
+                    r'password\s*=\s*[\'""]?([^\'""\s]+)[\'""]?', # Buscar contraseñas
+                    r'(ssh|ftp|telnet)\s*:\s*[^\s]+@[^\s]+',  # Buscar credenciales de acceso remoto
                     r'(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b)',  # Buscar direcciones IP
-                    r'(https?|ftp)\s*:\s*[^ ]+',              # Buscar URLs
-                    r'exec\s*\([^)]*sh\s+[-|<]',               # Buscar ejecución de shell
+                    r'(https?|ftp)\s*:\s*[^\s]+',  # Buscar URLs
+                    r'exec\s*\([^)]*sh\s+[-|<]',  # Buscar ejecución de shell
                     # Agregar más patrones según sea necesario
                 ]
 
@@ -353,28 +362,27 @@ def menu():
             if os.path.isfile(path):
                 suspicious_activities = analyze_file(path)
                 if suspicious_activities:
-                    print("Se encontraron actividades sospechosas:")
+                    print(f"Se encontraron actividades sospechosas en el archivo: {path}")
                     for activity in suspicious_activities:
                         print(activity)
                 else:
-                    print("No se encontraron actividades sospechosas en el archivo.")
+                    print(f"No se encontraron actividades sospechosas en el archivo: {path}")
             elif os.path.isdir(path):
                 suspicious_activities = analyze_directory(path)
-                if suspicious_activities:
-                    print("Se encontraron actividades sospechosas en los siguientes archivos:")
-                    for file_path, activities in suspicious_activities.items():
-                        if activities:
-                            print(f"Archivo: {file_path}")
-                            for activity in activities:
-                                print(activity)
+                suspicious_files = [file_path for file_path, activities in suspicious_activities.items() if activities]
+                if suspicious_files:
+                    print("Se encontraron actividades sospechosas en los siguientes archivos y/o directorios:")
+                    for file_path in suspicious_files:
+                        print(f"Archivo o directorio: {file_path}")
+                        for activity in suspicious_activities[file_path]:
+                            print(activity)
                 else:
-                    print("No se encontraron actividades sospechosas en el directorio.")
+                    print(f"No se encontraron actividades sospechosas en los siguientes archivos y/o directorios: {path}")
             else:
                 print("La ruta especificada no es válida.")
 
         if __name__ == "__main__":
             main()
-
 
 def main():
     while True:
